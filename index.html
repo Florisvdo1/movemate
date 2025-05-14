@@ -1,24 +1,3 @@
-<!--
-README
-=======
-MoveMate – ver 0.9 (14‑May‑2025)
---------------------------------
-Een self‑contained, offline‑capable mobiele Progressive Web App (PWA) voor het beheren van verhuizing‑taken.
-
-- React + Vite‑achtige moduleflow (geen build nodig)
-- TailwindCSS voor Calm‑achtige UI, WCAG 2.2 AA compliant, dark/light‑modus
-- IndexedDB‑opslag met AES‑GCM‑encryptie (WebCrypto API)
-- Drag‑&‑drop Kanban, tijdslijn, inventaris met foto’s, notities, gamified analytics
-- Portret‑locked, fullscreen, non‑zoom, haptic feedback
-- Service‑worker caches alle assets → offline na 1ste laad
-- Extensie‑hooks: "plugin:register" CustomEvent & "sync:github" stub
-- Inline micro‑unit‑tests (uitvoer in console)
-
-Bestand ≤ 200 kB gzip (≈ 550 kB raw).
-
-© 2025 Floris van den Oever – MIT‑licentie
--->
-<!DOCTYPE html>
 <html lang="nl" class="h-full">
   <head>
     <meta charset="utf-8" />
@@ -32,12 +11,11 @@ Bestand ≤ 200 kB gzip (≈ 550 kB raw).
       rel="icon"
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path fill='%23fff' d='M4 12h24v14H4z'/><path fill='%23AEE1E1' d='M2 14l14-12 14 12z'/></svg>"
     />
-    <!-- PWA‑manifest inline; één data‑URI voorkomt aparte file -->
     <link
       rel="manifest"
-      href="data:application/manifest+json,{&quot;name&quot;:&quot;MoveMate&quot;,&quot;short_name&quot;:&quot;MoveMate&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;orientation&quot;:&quot;portrait&quot;,&quot;start_url&quot;:&quot;/movemate/&quot;,&quot;background_color&quot;:&quot;#E5F6F6&quot;,&quot;theme_color&quot;:&quot;#AEE1E1&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAA...&quot;}]}"
+      href="data:application/manifest+json,{&quot;name&quot;:&quot;MoveMate&quot;,&quot;short_name&quot;:&quot;MoveMate&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;orientation&quot;:&quot;portrait&quot;,&quot;start_url&quot;:&quot;/movemate/&quot;,&quot;background_color&quot;:&quot;#E5F6F6&quot;,&quot;theme_color&quot;:&quot;#AEE1E1&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAA...&quot;}] }"
     />
-    <!-- Tailwind via JSDelivr; wordt gecachet door de service‑worker -->
+    <!-- Tailwind (wordt gecachet door service‑worker) -->
     <link
       href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.1/dist/tailwind.min.css"
       rel="stylesheet"
@@ -48,14 +26,15 @@ Bestand ≤ 200 kB gzip (≈ 550 kB raw).
         -webkit-tap-highlight-color: transparent;
       }
     </style>
-    <!-- Import maps voor ES‑modules (React 18, idb‑keyval, uuid) -->
+    <!-- ES‑module import map -->
     <script type="importmap">
       {
         "imports": {
           "react": "https://esm.sh/react@18.3.1",
           "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
           "idb-keyval": "https://esm.sh/idb-keyval@6",
-          "uuid": "https://esm.sh/uuid@9?target=es2022"
+          "uuid": "https://esm.sh/uuid@9?target=es2022",
+          "htm": "https://esm.sh/htm@3.1.1"
         }
       }
     </script>
@@ -65,7 +44,7 @@ Bestand ≤ 200 kB gzip (≈ 550 kB raw).
   >
     <div id="app" class="h-full"></div>
 
-    <!-- Service‑worker inlined als blob -->
+    <!-- Service‑worker inline → offline support -->
     <script>
       if ("serviceWorker" in navigator) {
         const sw = `self.addEventListener('install',e=>e.waitUntil(caches.open('movemate-v1').then(c=>c.addAll(['./','index.html']))));self.addEventListener('fetch',e=>e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{let resp=res.clone();caches.open('movemate-v1').then(c=>c.put(e.request,resp));return res;}))));`;
@@ -76,15 +55,17 @@ Bestand ≤ 200 kB gzip (≈ 550 kB raw).
     </script>
 
     <script type="module">
-      /********************  Core helpers  ********************/
+      /********************  Imports  ********************/
       import React, { useState, useEffect, useRef } from "react";
       import { createRoot } from "react-dom/client";
       import { set, del, get, keys } from "idb-keyval";
       import { v4 as uuid } from "uuid";
+      import htm from "htm";
+      const html = htm.bind(React.createElement);
 
+      /********************  Crypto helpers  ********************/
       const iv = new Uint8Array(12);
       crypto.getRandomValues(iv);
-
       async function deriveKey(pw) {
         const enc = new TextEncoder().encode(pw);
         return crypto.subtle.importKey(
@@ -95,7 +76,7 @@ Bestand ≤ 200 kB gzip (≈ 550 kB raw).
           ["encrypt", "decrypt"]
         );
       }
-      async function enc(data, key) {
+      async function encData(data, key) {
         const enc = new TextEncoder().encode(JSON.stringify(data));
         const buf = await crypto.subtle.encrypt(
           { name: "AES-GCM", iv },
@@ -104,7 +85,7 @@ Bestand ≤ 200 kB gzip (≈ 550 kB raw).
         );
         return btoa(String.fromCharCode(...new Uint8Array(buf)));
       }
-      async function dec(str, key) {
+      async function decData(str, key) {
         const bin = Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
         const buf = await crypto.subtle.decrypt(
           { name: "AES-GCM", iv },
@@ -114,7 +95,7 @@ Bestand ≤ 200 kB gzip (≈ 550 kB raw).
         return JSON.parse(new TextDecoder().decode(buf));
       }
 
-      /********************  Custom hook  ********************/
+      /********************  IndexedDB hook  ********************/
       function useDB(pass) {
         const [key, setKey] = useState(null);
         const [data, setData] = useState([]);
@@ -128,7 +109,7 @@ Bestand ≤ 200 kB gzip (≈ 550 kB raw).
           keys()
             .then((ks) =>
               Promise.all(
-                ks.map((k) => get(k).then((v) => dec(v, key)))
+                ks.map((k) => get(k).then((v) => decData(v, key)))
               )
             )
             .then(setData);
@@ -136,8 +117,8 @@ Bestand ≤ 200 kB gzip (≈ 550 kB raw).
 
         const save = async (obj) => {
           const id = obj.id || uuid();
-          await set(id, await enc({ ...obj, id }, key));
-          navigator.vibrate?.(20);
+          await set(id, await encData({ ...obj, id }, key));
+          navigator.vibrate?.(15);
           setData((d) => {
             const n = d.filter((t) => t.id !== id);
             return [...n, { ...obj, id }];
@@ -150,137 +131,115 @@ Bestand ≤ 200 kB gzip (≈ 550 kB raw).
         return { data, save, remove };
       }
 
-      /********************  UI components  ********************/
-      const TabButton = ({ i, cur, set, label }) => (
-        <button
-          aria-controls={"panel" + i}
-          aria-selected={cur === i}
-          onClick={() => set(i)}
-          className={`px-3 py-2 text-sm font-medium rounded-t-lg focus:outline-none ${
+      /********************  UI Components  ********************/
+      const TabButton = ({ i, cur, set, label }) =>
+        html`<button
+          aria-controls=${"panel" + i}
+          aria-selected=${cur === i}
+          class="px-3 py-2 text-sm font-medium rounded-t-lg focus:outline-none ${
             cur === i ? "bg-white dark:bg-slate-700" : "bg-transparent"
-          }`}
-        >
-          {label}
-        </button>
-      );
+          }"
+          onClick=${() => set(i)}
+        >${label}</button>`;
 
-      function Kanban({ tasks, save }) {
+      const Kanban = ({ tasks, save }) => {
         const cols = ["Todo", "Busy", "Done"];
-        return (
-          <div className="flex gap-3 overflow-x-auto">
-            {cols.map((col) => {
-              const colTasks = tasks.filter((t) => t.status === col);
-              return (
-                <div key={col} className="min-w-[200px] flex-1">
-                  <h2 className="font-semibold mb-2">{col}</h2>
-                  <div
-                    className="space-y-2"
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      const id = e.dataTransfer.getData("id");
-                      const t = tasks.find((x) => x.id === id);
-                      save({ ...t, status: col });
-                    }}
-                  >
-                    {colTasks.map((t) => (
-                      <div
-                        key={t.id}
-                        draggable
-                        onDragStart={(e) => e.dataTransfer.setData("id", t.id)}
-                        className="p-2 rounded shadow bg-teal-200 dark:bg-slate-600 cursor-grab"
-                      >
-                        {t.title}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        );
-      }
+        return html`<div class="flex gap-3 overflow-x-auto">
+          ${cols.map((col) => {
+            const colTasks = tasks.filter((t) => t.status === col);
+            return html`<div key=${col} class="min-w-[200px] flex-1">
+              <h2 class="font-semibold mb-2">${col}</h2>
+              <div
+                class="space-y-2"
+                onDragOver=${(e) => e.preventDefault()}
+                onDrop=${(e) => {
+                  const id = e.dataTransfer.getData("id");
+                  const t = tasks.find((x) => x.id === id);
+                  save({ ...t, status: col });
+                }}
+              >
+                ${colTasks.map(
+                  (t) => html`<div
+                    key=${t.id}
+                    draggable="true"
+                    onDragStart=${(e) => e.dataTransfer.setData("id", t.id)}
+                    class="p-2 rounded shadow bg-teal-200 dark:bg-slate-600 cursor-grab"
+                  >${t.title}</div>`
+                )}
+              </div>
+            </div>`;
+          })}
+        </div>`;
+      };
 
-      const Timeline = ({ tasks }) => (
-        <ul className="timeline border-l pl-4 space-y-2">
-          {tasks
+      const Timeline = ({ tasks }) =>
+        html`<ul class="timeline border-l pl-4 space-y-2">
+          ${tasks
             .slice()
             .sort((a, b) => new Date(a.due) - new Date(b.due))
-            .map((t) => (
-              <li key={t.id}>
-                <span className="text-xs">
-                  {new Date(t.due).toLocaleDateString()}
+            .map(
+              (t) => html`<li key=${t.id}>
+                <span class="text-xs">
+                  ${new Date(t.due).toLocaleDateString()}
                 </span>
-                <span className="ml-2">{t.title}</span>
-              </li>
-            ))}
-        </ul>
-      );
+                <span class="ml-2">${t.title}</span>
+              </li>`
+            )}
+        </ul>`;
 
-      function Inventory({ tasks, save }) {
-        return (
-          <div className="space-y-4">
-            {tasks
-              .filter((t) => t.type === "item")
-              .map((t) => (
-                <div key={t.id} className="flex items-center gap-2">
-                  <img
-                    src={t.img || ""}
-                    alt="foto"
-                    className="w-16 h-16 object-cover rounded"
-                  />
-                  <input
-                    className="flex-1 bg-transparent border-b"
-                    value={t.title}
-                    onChange={(e) => save({ ...t, title: e.target.value })}
-                  />
-                </div>
-              ))}
-            <button
-              onClick={() => {
-                const f = document.createElement("input");
-                f.type = "file";
-                f.accept = "image/*";
-                f.onchange = async () => {
-                  const file = f.files[0];
-                  const url = URL.createObjectURL(file);
-                  save({ type: "item", title: "Nieuw", img: url });
-                };
-                f.click();
-              }}
-              className="px-4 py-2 bg-teal-500 text-white rounded"
-            >
-              + Voeg item toe
-            </button>
-          </div>
-        );
-      }
+      const Inventory = ({ tasks, save }) => {
+        return html`<div class="space-y-4">
+          ${tasks
+            .filter((t) => t.type === "item")
+            .map(
+              (t) => html`<div key=${t.id} class="flex items-center gap-2">
+                <img
+                  src=${t.img || ""}
+                  alt="foto"
+                  class="w-16 h-16 object-cover rounded"
+                />
+                <input
+                  class="flex-1 bg-transparent border-b"
+                  value=${t.title}
+                  onInput=${(e) => save({ ...t, title: e.target.value })}
+                />
+              </div>`
+            )}
+          <button
+            class="px-4 py-2 bg-teal-500 text-white rounded"
+            onClick=${() => {
+              const f = document.createElement("input");
+              f.type = "file";
+              f.accept = "image/*";
+              f.onchange = async () => {
+                const file = f.files[0];
+                const url = URL.createObjectURL(file);
+                save({ type: "item", title: "Nieuw", img: url });
+              };
+              f.click();
+            }}
+          >+ Voeg item toe</button>
+        </div>`;
+      };
 
       const Notes = ({ tasks, save }) => {
         const note = tasks.find((t) => t.id === "__notes") || {
           id: "__notes",
           content: "",
         };
-        return (
-          <textarea
-            value={note.content}
-            onChange={(e) => save({ ...note, content: e.target.value })}
-            className="w-full h-40 p-2 bg-white dark:bg-slate-700 rounded"
-          ></textarea>
-        );
+        return html`<textarea
+          class="w-full h-40 p-2 bg-white dark:bg-slate-700 rounded"
+          value=${note.content}
+          onInput=${(e) => save({ ...note, content: e.target.value })}
+        ></textarea>`;
       };
 
       const Analytics = ({ tasks }) => {
         const done = tasks.filter((t) => t.status === "Done").length;
-        return (
-          <div className="p-4">
-            <p className="text-lg">Voltooide taken: {done}</p>
-            <progress
-              max={tasks.length}
-              value={done}
-              className="w-full h-4"
-            ></progress>
-          </div>
-        );
+        return html`<div class="p-4">
+          <p class="text-lg">Voltooide taken: ${done}</p>
+          <progress max=${tasks.length} value=${done} class="w-full h-4"></progress>
+        </div>`;
       };
 
       /********************  Main App  ********************/
@@ -290,31 +249,11 @@ Bestand ≤ 200 kB gzip (≈ 550 kB raw).
         const { data, save } = useDB(passRef.current);
 
         const sample = [
-          {
-            title: "Autoverzekering claimen",
-            status: "Todo",
-            due: "2025-05-20",
-          },
-          {
-            title: "Letselschade advies",
-            status: "Todo",
-            due: "2025-06-01",
-          },
-          {
-            title: "Meubels & vloer plannen",
-            status: "Busy",
-            due: "2025-05-25",
-          },
-          {
-            title: "Verhuizing organiseren",
-            status: "Busy",
-            due: "2025-05-30",
-          },
-          {
-            title: "Medicatie-reminder",
-            status: "Todo",
-            due: "2025-05-15",
-          },
+          { title: "Autoverzekering claimen", status: "Todo", due: "2025-05-20" },
+          { title: "Letselschade advies", status: "Todo", due: "2025-06-01" },
+          { title: "Meubels & vloer plannen", status: "Busy", due: "2025-05-25" },
+          { title: "Verhuizing organiseren", status: "Busy", due: "2025-05-30" },
+          { title: "Medicatie-reminder", status: "Todo", due: "2025-05-15" }
         ];
 
         useEffect(() => {
@@ -322,44 +261,32 @@ Bestand ≤ 200 kB gzip (≈ 550 kB raw).
         }, [data]);
 
         const tabs = [
-          { label: "Kanban", panel: <Kanban tasks={data} save={save} /> },
-          { label: "Timeline", panel: <Timeline tasks={data} /> },
-          { label: "Inventory", panel: <Inventory tasks={data} save={save} /> },
-          { label: "Notes", panel: <Notes tasks={data} save={save} /> },
-          { label: "Stats", panel: <Analytics tasks={data} /> },
+          { label: "Kanban", panel: Kanban({ tasks: data, save }) },
+          { label: "Timeline", panel: Timeline({ tasks: data }) },
+          { label: "Inventory", panel: Inventory({ tasks: data, save }) },
+          { label: "Notes", panel: Notes({ tasks: data, save }) },
+          { label: "Stats", panel: Analytics({ tasks: data }) }
         ];
 
-        return (
-          <div className="flex flex-col h-full">
-            <header className="p-3 flex justify-between items-center">
-              <h1 className="text-xl font-bold">MoveMate</h1>
-              <button
-                onClick={() =>
-                  document.documentElement.classList.toggle("dark")
-                }
-                aria-label="Toggle theme"
-              >
-                🌓
-              </button>
-            </header>
+        return html`<div class="flex flex-col h-full">
+          <header class="p-3 flex justify-between items-center">
+            <h1 class="text-xl font-bold">MoveMate</h1>
+            <button aria-label="Toggle theme" onClick=${() => document.documentElement.classList.toggle("dark")}>🌓</button>
+          </header>
 
-            <nav className="flex border-b dark:border-slate-600">
-              {tabs.map((t, i) => (
-                <TabButton key={i} i={i} cur={tab} set={setTab} label={t.label} />
-              ))}
-            </nav>
+          <nav class="flex border-b dark:border-slate-600">
+            ${tabs.map((t, i) => TabButton({ i, cur: tab, set: setTab, label: t.label }))}
+          </nav>
 
-            <main
-              className="flex-1 overflow-y-auto p-3"
-              id={"panel" + tab}
-            >
-              {tabs[tab].panel}
-            </main>
-          </div>
-        );
+          <main class="flex-1 overflow-y-auto p-3" id=${"panel" + tab}>
+            ${tabs[tab].panel}
+          </main>
+        </div>`;
       }
 
-      createRoot(document.getElementById("app")).render(<App />);
+      /********************  Render root  ********************/
+      const root = createRoot(document.getElementById("app"));
+      root.render(html`<${App} />`);
 
       /********************  Extensie-hooks & mini-tests  ********************/
       document.addEventListener("plugin:register", (e) =>
@@ -369,6 +296,7 @@ Bestand ≤ 200 kB gzip (≈ 550 kB raw).
 
       console.assert(typeof crypto !== "undefined", "WebCrypto beschikbaar");
       console.assert("serviceWorker" in navigator, "Service-worker beschikbaar");
+      console.log("MoveMate v0.95 geladen ✅");
     </script>
   </body>
 </html>
